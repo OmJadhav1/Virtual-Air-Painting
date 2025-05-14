@@ -1,123 +1,105 @@
 import cv2
 import numpy as np
-import os 
+import os
 import track_hands as TH
 
 class VideoCamera():
-    def __init__(self,overlay_image=[],draw_color =(255,200,100)):
-        self.cap = cv2.VideoCapture(0,cv2.CAP_DSHOW)
+    def __init__(self, overlay_image=[], draw_color=(255, 200, 100)):
+        self.cap = cv2.VideoCapture(0)
         self.cap.set(3, 1280)
-        self.cap.set(4,720)
-        self.xp =0
-        self.yp =0
-        self.x1 = 0
-        self.y1 = 0
-        self.x2= 0
-        self.y2 = 0
-        self.brush_thickness =15
-        self.eraser_thickness =100
-        self.overlay_image = overlay_image  
+        self.cap.set(4, 720)
+        self.xp = 0
+        self.yp = 0
+        self.brush_thickness = 15
+        self.eraser_thickness = 100
+        self.overlay_image = overlay_image
         self.draw_color = draw_color
-        self.detector = TH.handDetector(min_detection_confidence=0.85)
-        self.image_canvas = np.zeros((720,1280,3), np.uint8)
+        self.detector = TH.handDetector(
+            min_detection_confidence=0.7,
+            static_image_mode=False  # Better for video
+        )
+        self.image_canvas = np.zeros((720, 1280, 3), np.uint8)
         self.default_overlay = overlay_image[0]
+        self.color_regions = [
+            (0, 200, 0, overlay_image[0], (255, 0, 0)),
+            (200, 400, 1, overlay_image[1], (47, 225, 245)),
+            (400, 600, 2, overlay_image[2], (197, 47, 245)),
+            (600, 800, 3, overlay_image[3], (53, 245, 47)),
+            (1100, 1280, 4, overlay_image[4], (0, 0, 0))
+        ]
 
     def __del__(self):
         self.cap.release()
-    
-    def set_overlay(self,frame, overlay_image):
-        self.default_overlay = overlay_image[0]
-        frame[0:125,0:1280] = self.default_overlay
-        return frame
 
-    def get_frame(self, overlay_image):
-        _,frame = self.cap.read()
+    def get_frame(self):
+        success, frame = self.cap.read()
+        if not success:
+            return b''
+            
         frame = cv2.flip(frame, 1)
-        frame[0:125,0:1280] = self.default_overlay
-        frame = self.detector.findHands(frame, draw=True)
-        landmark_list = self.detector.findPosition(frame, draw =False)
+        frame = self.detector.findHands(frame)
+        landmark_list = self.detector.findPosition(frame, draw=False)
 
-        if(len(landmark_list)!=0):
-            self.x1, self.y1 =(landmark_list[8][1:]) #index
-            self.x2, self.y2 = landmark_list[12][1:] #middle    
-        
-            my_fingers = self.detector.fingerStatus()
-            if (my_fingers[1]and my_fingers[2]):
-                self.xp, self.yp = 0,0
-                if (self.y1<125):
-                    if(200<self.x1<340):
-                        self.default_overlay = overlay_image[0]
-                        frame[0:125,0:1280] = self.default_overlay 
-                        self.draw_color = (255,0,0)
-                    elif (340<self.x1<500):
-                        self.default_overlay = overlay_image[1]
-                        self.draw_color = (47,225,245)
-                        frame[0:125,0:1280] = self.default_overlay 
-                    elif (500<self.x1<640):
-                        self.default_overlay = overlay_image[2]
-                        self.draw_color = (197,47,245)
-                        frame[0:125,0:1280] = self.default_overlay 
-                    elif (640<self.x1<780):
-                        self.default_overlay = overlay_image[3]
-                        self.draw_color = (53,245,47)
-                        frame[0:125,0:1280] = self.default_overlay 
-                    elif (1100<self.x1<1280):
-                        self.default_overlay = overlay_image[4]
-                        self.draw_color = (0,0,0)
-                        frame[0:125,0:1280] = self.default_overlay 
+        # Process hand landmarks
+        if landmark_list:
+            x1, y1 = landmark_list[8][1:]  # Index finger
+            x2, y2 = landmark_list[12][1:]  # Middle finger
+            fingers = self.detector.fingerStatus()
 
-                cv2.putText(frame, 'Color Selector Mode', (900,680), fontFace=cv2.FONT_HERSHEY_COMPLEX, color= (0,255,255), thickness=2, fontScale=1)
-                cv2.line(frame, (self.x1,self.y1), (self.x2,self.y2), color=self.draw_color, thickness=3)
+            # Color Selection Mode
+            if fingers[1] and fingers[2]:
+                self.xp, self.yp = 0, 0
+                if y1 < 125:
+                    for x_start, x_end, idx, overlay, color in self.color_regions:
+                        if x_start <= x1 < x_end:
+                            self.default_overlay = overlay
+                            self.draw_color = color
+                            break
+                cv2.putText(frame, 'Color Selector', (900, 680), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                cv2.line(frame, (x1, y1), (x2, y2), self.draw_color, 3)
 
-            if (my_fingers[1] and not my_fingers[2]):
-                        
-                cv2.putText(frame, "Writing Mode", (900,680), fontFace= cv2.FONT_HERSHEY_COMPLEX, color= (255,255,0), thickness=2, fontScale=1)
-                cv2.circle(frame, (self.x1,self.y1),15, self.draw_color, thickness=-1)
+            # Drawing Mode
+            elif fingers[1] and not fingers[2]:
+                if self.xp == 0 and self.yp == 0:
+                    self.xp, self.yp = x1, y1
 
-                if self.xp ==0 and self.yp ==0:
-                    self.xp =self.x1 
-                    self.yp =self.y1
-                
-                if self.draw_color == (0,0,0):
-                    cv2.line(frame, (self.xp,self.yp),(self.x1,self.y1),color= self.draw_color, thickness=self.eraser_thickness)
-                    cv2.line(self.image_canvas, (self.xp,self.yp),(self.x1,self.y1),color= self.draw_color, thickness=self.eraser_thickness)
+                thickness = self.eraser_thickness if self.draw_color == (0, 0, 0) else self.brush_thickness
+                cv2.line(self.image_canvas, (self.xp, self.yp), (x1, y1), 
+                        self.draw_color, thickness)
 
-                else:
-                    cv2.line(frame, (self.xp,self.yp),(self.x1,self.y1),color= self.draw_color, thickness=self.brush_thickness)
-                    cv2.line(self.image_canvas, (self.xp,self.yp),(self.x1,self.y1),color= self.draw_color, thickness=self.brush_thickness)
-                
-                self.xp , self.yp = self.x1, self.y1
-          
-        frame[0:125,0:1280] = self.default_overlay 
+                self.xp, self.yp = x1, y1
+                cv2.putText(frame, 'Drawing', (900, 680), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+
+        # Merge canvas and frame
+        frame[0:125, 0:1280] = self.default_overlay
         img_gray = cv2.cvtColor(self.image_canvas, cv2.COLOR_BGR2GRAY)
-        _, imginv= cv2.threshold(img_gray, 50, 255, cv2.THRESH_BINARY_INV)
-        imginv = cv2.cvtColor(imginv, cv2.COLOR_GRAY2BGR)
-        frame = cv2.bitwise_and(frame, imginv)
-        frame =cv2.bitwise_or(frame, self.image_canvas)
+        _, img_inv = cv2.threshold(img_gray, 50, 255, cv2.THRESH_BINARY_INV)
+        img_inv = cv2.cvtColor(img_inv, cv2.COLOR_GRAY2BGR)
+        frame = cv2.bitwise_and(frame, img_inv)
+        frame = cv2.bitwise_or(frame, self.image_canvas)
 
-        _,jpeg =cv2.imencode('.jpg', frame)
+        # Optimized encoding
+        ret, jpeg = cv2.imencode('.jpg', frame, 
+                               [int(cv2.IMWRITE_JPEG_QUALITY), 50])
         return jpeg.tobytes()
 
 def main():
-
-    overlay_image=[]
+    overlay_image = []
     header_img = "Images"
     header_img_list = os.listdir(header_img)
-    for i in header_img_list:
-        image = cv2.imread(f'{header_img}/{i}')
-        overlay_image.append(image)
+    for img in header_img_list:
+        overlay_image.append(cv2.imread(f'{header_img}/{img}'))
 
     cam1 = VideoCamera(overlay_image=overlay_image)
 
     while True:
-        ret, input_img = cam1.cap.read()
-        input_img = cv2.flip(input_img,1)
-        my_frame = cam1.get_frame(frame=input_img, overlay_image= overlay_image)   
-     
-        cv2.imshow('out', my_frame)
-        cv2.waitKey(1)
-        
-    
-if __name__ =="__main__" :
+        frame_bytes = cam1.get_frame()
+        if cv2.waitKey(1) == ord('q'):
+            break
+            
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
     main()
-    
