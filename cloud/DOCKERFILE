@@ -1,0 +1,20 @@
+# Start from a Python base image
+FROM python:3.14
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy the requirements.txt (Make sure you have a requirements.txt file)
+COPY requirements.txt .
+
+# Install the Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of your application code into the container
+COPY . .
+
+# Expose port 5000 for the Flask application (or change it to your app’s port)
+EXPOSE 5000
+
+# Set the entrypoint to run your application (e.g., Flask or FastAPI app)
+CMD ["python", "painter.py"]
